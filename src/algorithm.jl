@@ -758,7 +758,7 @@ Train the policy for `model`. Keyword arguments:
  - `sampling_scheme`: a sampling scheme to use on the forward pass of the
     algorithm. Defaults to [`InSampleMonteCarlo`](@ref).
 
- - `backward_pass_sampler`: a backward pass sampling scheme to use on the backward 
+ - `backward_pass_sampler`: a backward pass sampling scheme to use on the backward
    pass of the algorithm. Defaults to `CompleteSampler`.
 
  - `cut_type`: choose between `SDDP.SINGLE_CUT` and `SDDP.MULTI_CUT` versions of SDDP.

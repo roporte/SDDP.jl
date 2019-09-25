@@ -268,8 +268,7 @@ function refine_bellman_function(
             risk_adjusted_probability,
             objective_realizations,
             dual_variables)
-    else  # Add a multi-cut
-        @assert bellman_function.cut_type == MULTI_CUT
+    else if  bellman_function.cut_type ==  MULTI_CUT
         _add_locals_if_necessary(bellman_function, length(dual_variables))
         _add_multi_cut(
             node,
@@ -277,9 +276,73 @@ function refine_bellman_function(
             risk_adjusted_probability,
             objective_realizations,
             dual_variables)
+    else if bellman_function.cut_type == STOCH_DECOMP
+        _add_locals_sd_if_necessary(bellman_function, length(dual_variables))
+        _add_stoch_decomp_cut(node,
+        outgoing_state,
+        risk_adjusted_probability,
+        objective_realizations,
+        dual_variables)
     end
 end
+function _add_stoch_decomp_cut(node::Node, outgoing_state::Dict{Symbol, Float64},
+                        risk_adjusted_probability::Vector{Float64},
+                        objective_realizations::Vector{Float64},
+                        dual_variables::Vector{Dict{Symbol, Float64}})
+    N = length(risk_adjusted_probability)
+    @assert N == length(objective_realizations) == length(dual_variables)
+    bellman_function = node.bellman_function
+    μᵀy = get_objective_state_component(node) + get_belief_state_component(node)
+    for i in 1:length(dual_variables)
+        _add_cut(bellman_function.local_thetas[i], objective_realizations[i],
+                 dual_variables[i], outgoing_state, μᵀy)
+    end
+    model = JuMP.owner_model(bellman_function.global_theta.theta)
+    cut_expr = @expression(model, sum(
+        risk_adjusted_probability[i] * bellman_function.local_thetas[i].theta
+        for i in 1:N) - (1 - sum(risk_adjusted_probability)) * μᵀy
+    )
+    # TODO(odow): should we use `cut_expr` instead?
+    ξ = copy(risk_adjusted_probability)
+    if !(ξ in bellman_function.risk_set_cuts) || μᵀy != JuMP.AffExpr(0.0)
+        push!(bellman_function.risk_set_cuts, ξ)
+        if JuMP.objective_sense(model) == MOI.MIN_SENSE
+            @constraint(model, bellman_function.global_theta.theta >= cut_expr)
+        else
+            @constraint(model, bellman_function.global_theta.theta <= cut_expr)
+        end
+    end
+    return
+end
 
+function _add_locals_if_necessary(bellman_function::BellmanFunction, N::Int)
+    num_local_thetas = length(bellman_function.local_thetas)
+    if num_local_thetas == N
+        # Do nothing. Already initialized.
+    elseif num_local_thetas == 0
+        global_theta = bellman_function.global_theta
+        model = JuMP.owner_model(global_theta.theta)
+        local_thetas = @variable(model, [1:N])
+        if JuMP.has_lower_bound(global_theta.theta)
+            JuMP.set_lower_bound.(local_thetas, JuMP.lower_bound(global_theta.theta))
+        end
+        if JuMP.has_upper_bound(global_theta.theta)
+            JuMP.set_upper_bound.(local_thetas, JuMP.upper_bound(global_theta.theta))
+        end
+        for local_theta in local_thetas
+            push!(
+                bellman_function.local_thetas,
+                ConvexApproximation(
+                    local_theta, global_theta.states,
+                    global_theta.cut_oracle.deletion_minimum
+                )
+            )
+        end
+    else
+        error("Expected $(N) local θ variables but there were $(num_local_thetas).")
+    end
+    return
+end
 function _add_average_cut(node::Node, outgoing_state::Dict{Symbol, Float64},
                           risk_adjusted_probability::Vector{Float64},
                           objective_realizations::Vector{Float64},
