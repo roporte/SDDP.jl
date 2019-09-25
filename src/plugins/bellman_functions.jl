@@ -315,7 +315,7 @@ function _add_stoch_decomp_cut(node::Node, outgoing_state::Dict{Symbol, Float64}
     return
 end
 
-function _add_locals_if_necessary(bellman_function::BellmanFunction, N::Int)
+function _add_locals_sd_if_necessary(bellman_function::BellmanFunction, N::Int)
     num_local_thetas = length(bellman_function.local_thetas)
     if num_local_thetas == N
         # Do nothing. Already initialized.
