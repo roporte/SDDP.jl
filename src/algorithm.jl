@@ -548,7 +548,14 @@ function solve_all_children(
             continue
         end
         child_node = model[child.term]
-        for noise in sample_backward_noise_terms(backward_sampling_scheme, child_node)
+        noises_to_solve = []
+        if node.bellman_function.cut_type == STOCH_CUT_PLANE
+            backward_sampling_cheme = SDDP.MonteCarloSampler(1)
+            noises_to_solve = node.old_noises
+        end
+
+        noises_to_solve = vcat(noises_to_solve,sample_backward_noise_terms(backward_sampling_scheme, child_node))
+        for noise in noises_to_solve
             if length(scenario_path) == length_scenario_path
                 push!(scenario_path, (child.term, noise.term))
             else

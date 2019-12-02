@@ -314,6 +314,8 @@ mutable struct Node{T}
     children::Vector{Noise{T}}
     # A vector of the discrete stagewise-independent noise terms.
     noise_terms::Vector{Noise}
+    # A vector of the noises sampled in this node in previous iterations
+    old_noises::Vector{Noise}
     # A function parameterize(model::JuMP.Model, noise) that modifies the JuMP
     # model based on the observation of the noise.
     parameterize::Function  # TODO(odow): make this a concrete type?

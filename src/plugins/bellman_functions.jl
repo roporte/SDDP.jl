@@ -305,7 +305,7 @@ function refine_bellman_function(
             objective_realizations,
             dual_variables
         )
-    else  # Add a multi-cut
+    elseif bellman_function.cut_type == MULTI_CUT  # Add a multi-cut
         @assert bellman_function.cut_type == MULTI_CUT
         _add_locals_if_necessary(bellman_function, length(dual_variables))
         _add_multi_cut(
@@ -315,7 +315,44 @@ function refine_bellman_function(
             objective_realizations,
             dual_variables
         )
+    else bellman_function.cut_type == STOCH_CUT_PLANE
+        @assert bellman_function.cut_type == STOCH_CUT_PLANE
+        _add_stoch_cut(
+            node,
+            outgoing_state,
+            risk_adjusted_probability,
+            objective_realizations,
+            dual_variables
+        )
     end
+end
+
+function _add_stoch_cut(
+    node::Node,
+    outgoing_state::Dict{Symbol, Float64},
+    risk_adjusted_probability::Vector{Float64},
+    objective_realizations::Vector{Float64},
+    dual_variables::Vector{Dict{Symbol, Float64}}
+)
+    N = length(risk_adjusted_probability)
+    @assert N == length(objective_realizations) == length(dual_variables)
+    # Calculate the expected intercept and dual variables with respect to the
+    # risk-adjusted probability distributino.
+    πᵏ = Dict(key => 0.0 for key in keys(outgoing_state))
+    θᵏ = 0.0
+    for i in 1:length(objective_realizations)
+        p = risk_adjusted_probability[i]
+        θᵏ += p * objective_realizations[i]
+        for (key, dual) in dual_variables[i]
+            πᵏ[key] += p * dual
+        end
+    end
+    # Now add the average-cut to the subproblem. We include the objective-state
+    # component μᵀy and the belief state (if it exists).
+    μᵀy = get_objective_state_component(node)
+    JuMP.add_to_expression!(μᵀy, get_belief_state_component(node))
+    _add_cut(node.bellman_function.global_theta, θᵏ, πᵏ, outgoing_state, μᵀy)
+    return
 end
 
 function _add_average_cut(
@@ -384,38 +421,6 @@ function _add_multi_cut(
         else
             @constraint(model, bellman_function.global_theta.theta <= cut_expr)
         end
-    end
-    return
-end
-
-# If we are adding a multi-cut for the first time, then the local θ variables
-# won't have been added.
-# TODO(odow): a way to set different bounds for each variable in the multi-cut.
-function _add_locals_if_necessary(bellman_function::BellmanFunction, N::Int)
-    num_local_thetas = length(bellman_function.local_thetas)
-    if num_local_thetas == N
-        # Do nothing. Already initialized.
-    elseif num_local_thetas == 0
-        global_theta = bellman_function.global_theta
-        model = JuMP.owner_model(global_theta.theta)
-        local_thetas = @variable(model, [1:N])
-        if JuMP.has_lower_bound(global_theta.theta)
-            JuMP.set_lower_bound.(local_thetas, JuMP.lower_bound(global_theta.theta))
-        end
-        if JuMP.has_upper_bound(global_theta.theta)
-            JuMP.set_upper_bound.(local_thetas, JuMP.upper_bound(global_theta.theta))
-        end
-        for local_theta in local_thetas
-            push!(
-                bellman_function.local_thetas,
-                ConvexApproximation(
-                    local_theta, global_theta.states,
-                    global_theta.cut_oracle.deletion_minimum
-                )
-            )
-        end
-    else
-        error("Expected $(N) local θ variables but there were $(num_local_thetas).")
     end
     return
 end
